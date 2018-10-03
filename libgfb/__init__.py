@@ -1,2 +1,2 @@
-name = 'libtsne'
-from libtsne.libtsne import *
+name = 'libgfb'
+from libgfb.libgfb import *
