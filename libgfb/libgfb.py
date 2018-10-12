@@ -10,9 +10,6 @@ import collections
 import os
 import sys
 import struct
-sys.path.append('/ifs/scratch/cancer/Lab_RDF/abh2138/scripts/python/lib/libdna/libdna')
-sys.path.append('/ifs/scratch/cancer/Lab_RDF/abh2138/scripts/python/lib/libgff/libgff')
-sys.path.append('/ifs/scratch/cancer/Lab_RDF/abh2138/scripts/python/lib/libgenomic/libgenomic')
 import libgff
 import libgenomic
 import libdna
@@ -362,7 +359,7 @@ class GFBReader(libgenomic.SingleDBGenes):
             reader.seek(address)
 
             size = GFBReader._read_int(reader)
-            
+              
             for i in range(0, size):
                 ga = GFBReader._read_int(reader)
                 
@@ -409,15 +406,19 @@ class GFBReader(libgenomic.SingleDBGenes):
         return ret
     
     @staticmethod
-    def _read_tags(e, reader):
+    def _read_tags(reader):
         n = GFBReader._read_byte(reader)
         
+        ret = [''] * n
+        
         for i in range(0, n):
-            e.add_tag(GFBReader._read_tag(reader))
+            ret[i] = GFBReader._read_tag(reader)
+            
+        return ret
             
             
     @staticmethod
-    def _read_id(e, reader):
+    def _read_id(reader):
         #address = GFBReader._read_int(reader)
         #address2 = GFBReader._read_int(reader)
         d = reader.read(8)
@@ -425,14 +426,19 @@ class GFBReader(libgenomic.SingleDBGenes):
         address2, _ = GFBReader._scan_int(d, offset=offset)
     
         pos = reader.tell()
-    
-        e.set_id(GFBReader._read_string(address, reader), GFBReader._read_string(address2, reader))
+        
+        key = GFBReader._read_string(address, reader)
+        value = GFBReader._read_string(address2, reader)
+        
+        #print('id', key, value)
     
         reader.seek(pos)
         
+        return key, value
+        
         
     @staticmethod
-    def _read_ids(e, reader):
+    def _read_ids(reader):
         """
         Loads the ids for a given entity onto the entity.
         
@@ -445,10 +451,16 @@ class GFBReader(libgenomic.SingleDBGenes):
             begins in the file.
         """
         
+        ret = {}
+        
         n = GFBReader._read_byte(reader)
         
         for i in range(0, n):
-            GFBReader._read_id(e, reader)
+            key, value = GFBReader._read_id(reader)
+            
+            ret[key] = value
+        
+        return ret
             
     @staticmethod
     def _gene_addresses_from_radix(id, reader):
@@ -504,6 +516,7 @@ class GFBReader(libgenomic.SingleDBGenes):
         # skip past number of addresses and the addresses themselves
         # reader.seek(address + N_BYTES + reader.readInt() *
         # RADIX_TREE_PREFIX_BYTES)
+        
         reader.seek(GFBReader._read_byte(reader) * RADIX_TREE_PREFIX_BYTES, 1)
 
         # Should be on a node that is hopefully matches our search term
@@ -609,13 +622,14 @@ class GFBReader(libgenomic.SingleDBGenes):
     
     @staticmethod
     def _read_entity(level, reader):
-
+        
         # Skip id (int) and type (byte)
         reader.seek(INT_BYTES + 1, 1) # .readInt()
 
         loc = GFBReader._read_location(reader)
         
         strand = GFBReader._read_strand(reader)
+        
 
         if level == libgenomic.GENE:
             gene = libgenomic.Gene(loc.chr, loc.start, loc.end, strand)
@@ -624,59 +638,55 @@ class GFBReader(libgenomic.SingleDBGenes):
         else:
             gene = libgenomic.Transcript(loc.chr, loc.start, loc.end, strand)
 
-        GFBReader._read_ids(gene, reader)
-
-        GFBReader._read_tags(gene, reader)
-
+        gene.set_ids(GFBReader._read_ids(reader))
+        gene.add_tags(GFBReader._read_tags(reader))
+        
         return gene
     
     
     @staticmethod
-    def _read_exon(level, gene, transcript, ret, reader):
-        exon = GFBReader._read_entity(libgenomic.EXON, reader)
-
-        # skip byte for exon child count, since exons cannot have children
-        # so this byte is always set to zero.
-        reader.seek(1, 1)
-
-        if transcript is not None:
-            transcript.add(exon)
-
-        if level == libgenomic.EXON:
-            ret.append(exon)
-    
-
-    @staticmethod
-    def _read_transcript(level, gene, ret, reader):
-        transcript = GFBReader._read_entity(libgenomic.TRANSCRIPT, reader)
-
-        n = GFBReader._read_byte(reader)
-
-        for i in range(0, n):
-            GFBReader._read_exon(level, gene, transcript if level != libgenomic.EXON else None, ret, reader)
-
-        if gene is not None:
-            gene.add(transcript)
-
-        if level == libgenomic.TRANSCRIPT:
-            ret.append(transcript)
-    
-    
-    @staticmethod
-    def _read_gene(level, ret, reader):
-        # System.err.println("Reading gene")
-
-        gene = GFBReader._read_entity(libgenomic.GENE, reader)
-
+    def _read_exons(level, transcript, reader, ret):
+        # number of exons using transcript block
         n = GFBReader._read_byte(reader)
         
         for i in range(0, n):
-            # If type requested is not a gene, pass null to indicate that the
-            # transcripts should not add themselves to the gene
-            GFBReader._read_transcript(level, gene if level == libgenomic.GENE else None, ret, reader)
+            exon = GFBReader._read_entity(libgenomic.EXON, reader)
 
+            # skip byte for exon child count, since exons cannot have children
+            # so this byte is always set to zero.
+            reader.seek(1, 1)
+
+            if transcript is not None:
+                transcript.add(exon)
+
+            if level == libgenomic.EXON:
+                ret.append(exon)
+    
+
+    @staticmethod
+    def _read_transcripts(level, gene, reader, ret):
+        n = GFBReader._read_byte(reader)
+        
+        for i in range(0, n):
+            transcript = GFBReader._read_entity(libgenomic.TRANSCRIPT, reader)
+
+            if gene is not None:
+                gene.add(transcript)
+
+            if level == libgenomic.TRANSCRIPT:
+                ret.append(transcript)
+            
+            GFBReader._read_exons(level, transcript, reader, ret)
+    
+    
+    @staticmethod
+    def _read_genes(level, reader, ret):
+        gene = GFBReader._read_entity(libgenomic.GENE, reader)
+        
         if (level == libgenomic.GENE):
             ret.append(gene)
+            
+        GFBReader._read_transcripts(level, gene, reader, ret)
             
     
     @staticmethod
@@ -685,8 +695,8 @@ class GFBReader(libgenomic.SingleDBGenes):
         
         for address in addresses:
             reader.seek(address)
-
-            GFBReader._read_gene(level, ret, reader)
+            
+            GFBReader._read_genes(level, reader, ret)
             
         return ret
     
@@ -743,9 +753,9 @@ class GFBReader(libgenomic.SingleDBGenes):
         bins = GFBReader._bin_addresses_from_bins(bins, self.__reader)
         
         addresses = GFBReader._gene_addresses_from_bins(bins, self.__reader)
- 
+        
         ret = GFBReader._genes_from_gene_addresses(level, addresses, self.__reader)
-    
+
         return ret
     
     
@@ -777,7 +787,7 @@ class GFBReader(libgenomic.SingleDBGenes):
         
         genes = self._find_genes(loc, level=level)
         
-        return GFBReader._overlapping_genes(loc, genes)
+        return genes #GFBReader._overlapping_genes(loc, genes)
     
     
     def close(self):
@@ -795,22 +805,24 @@ class GFBReader(libgenomic.SingleDBGenes):
 if __name__ == '__main__':
     reader = GFBReader('gencode', 'grch38', '/home/antony/Desktop/gff/gfb/grch38')
     
-    genes = reader.find_genes('chr3:187,721,377-187,736,497')
+    genes = reader.find_genes('chr3:187,721,177-187,736,497')
     
-    print('tada')
-    
-    for gene in genes:
-        print(gene)
-        
-        
-    genes = reader.get_genes('BCL6')
-    
-    
-    print('sff')
+    print('tada-------------------------------------------')
     
     for gene in genes:
-        print(gene)
+        print(gene, id(gene), id(gene.ids))
         
-    reader.close()
+        
+    
+    
+    
+#    print('sff')
+#    
+#    genes = reader.get_genes('BCL6')
+#    
+#    for gene in genes:
+#        print(gene)
+#        
+#    reader.close()
         
         
