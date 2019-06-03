@@ -638,7 +638,7 @@ class GFBReader(libgenomic.SingleDBGenes):
         else:
             gene = libgenomic.Transcript(loc.chr, loc.start, loc.end, strand)
 
-        gene.set_ids(GFBReader._read_ids(reader))
+        gene.set_properties(GFBReader._read_ids(reader))
         gene.add_tags(GFBReader._read_tags(reader))
         
         return gene
